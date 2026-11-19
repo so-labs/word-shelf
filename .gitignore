@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local.*
+
+# 個人の辞書データはコミットしない
+DictionaryMaster.tsv
+Dictionary_*.txt
