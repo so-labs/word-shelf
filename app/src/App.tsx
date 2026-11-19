@@ -162,9 +162,24 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [noteIndex, setNoteIndex] = useState<number | null>(null);
   const [showTopButton, setShowTopButton] = useState(false);
   const topNavRef = useRef(false);
+
+  // バージョン表記は、sw.js の CACHE_NAME（正本）から抽出します。
+  // バージョン文字列を他のファイルに直書きしないための仕組みです。
+  useEffect(() => {
+    fetch("./sw.js")
+      .then((response) => response.text())
+      .then((text) => {
+        const match = text.match(/CACHE_NAME\s*=\s*"word-shelf-([^"]+)"/);
+        if (match?.[1]) setAppVersion(match[1]);
+      })
+      .catch(() => {
+        // 取得できない環境では、バージョンを表示しないだけです
+      });
+  }, []);
 
   // ある程度スクロールしたら「上へ戻る」ボタンを出します（スマホ向け）。
   // ボタンを押したら、その場で消します（戻る途中での再表示も抑えます）。
@@ -779,7 +794,7 @@ export default function App() {
               使い方を表示
             </button>
           </div>
-          <div className="settings-version">Ver. {APP_VERSION}</div>
+          <div className="settings-version">Ver. {appVersion ?? "-"}</div>
         </Modal>
       )}
 
@@ -858,10 +873,6 @@ export default function App() {
     </>
   );
 }
-
-// アプリのバージョンです。設定メニューの下部に表示します。
-// リリース（再デプロイ）のたびに r の数字を上げます。
-const APP_VERSION = "2026.11-r1";
 
 type ThemePref = "light" | "system" | "dark";
 const THEME_STORAGE_KEY = "word-shelf:theme";
