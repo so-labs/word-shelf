@@ -16,6 +16,12 @@ import {
   driveOpenMaster,
   driveSaveFiles,
 } from "./drive";
+import {
+  DEFAULT_EXPORT_TARGETS,
+  EXPORT_TARGETS_KEY,
+  parseExportTargets,
+  type ExportTargets,
+} from "./core/export-targets";
 import { loadSharedFile } from "./core/shared-file";
 import { clearWorkCopy, loadWorkCopy, saveWorkCopy, type WorkCopy } from "./core/work-copy";
 
@@ -1361,8 +1367,25 @@ function ExportModal({
   onClose: () => void;
   onMasterExported: () => void;
 }) {
-  const [includeGoogle, setIncludeGoogle] = useState(true);
-  const [includeMs, setIncludeMs] = useState(true);
+  // IME用ファイルのチェックは端末に覚えさせ、次回も同じ選択から
+  // 始められるようにします（既定は両方ON）。
+  const [targets, setTargets] = useState<ExportTargets>(() => {
+    try {
+      return parseExportTargets(localStorage.getItem(EXPORT_TARGETS_KEY));
+    } catch {
+      return { ...DEFAULT_EXPORT_TARGETS };
+    }
+  });
+  const includeGoogle = targets.google;
+  const includeMs = targets.microsoft;
+  const updateTargets = (next: ExportTargets) => {
+    setTargets(next);
+    try {
+      localStorage.setItem(EXPORT_TARGETS_KEY, JSON.stringify(next));
+    } catch {
+      // 保存できなくても、今回の出力は続けられます
+    }
+  };
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveSaved, setDriveSaved] = useState(false);
   const [driveError, setDriveError] = useState<string | null>(null);
@@ -1444,7 +1467,7 @@ function ExportModal({
           <input
             type="checkbox"
             checked={includeGoogle}
-            onChange={(e) => setIncludeGoogle(e.target.checked)}
+            onChange={(e) => updateTargets({ ...targets, google: e.target.checked })}
           />
           <span className="file-name">Dictionary_GoogleIME.txt</span>
         </label>
@@ -1459,7 +1482,7 @@ function ExportModal({
           <input
             type="checkbox"
             checked={includeMs}
-            onChange={(e) => setIncludeMs(e.target.checked)}
+            onChange={(e) => updateTargets({ ...targets, microsoft: e.target.checked })}
           />
           <span className="file-name">Dictionary_MicrosoftIME.txt</span>
         </label>
