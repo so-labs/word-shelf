@@ -4,6 +4,18 @@ import { parseMasterTsv, serializeMasterTsv } from "./core/master-tsv";
 import { serializeMicrosoftIme } from "./core/microsoft-ime";
 import { PARTS_OF_SPEECH, toMsImeConversion } from "./core/pos";
 import type { DictionaryEntry } from "./core/types";
+import {
+  MASTER_FILE_NAME,
+  DriveConflictError,
+  clearDriveBaseline,
+  driveAccountHint,
+  driveConnect,
+  driveDisconnect,
+  driveIsConfigured,
+  driveIsConnected,
+  driveOpenMaster,
+  driveSaveFiles,
+} from "./drive";
 import { loadSharedFile } from "./core/shared-file";
 import { clearWorkCopy, loadWorkCopy, saveWorkCopy, type WorkCopy } from "./core/work-copy";
 
@@ -161,6 +173,8 @@ export default function App() {
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [driveSettingsError, setDriveSettingsError] = useState<string | null>(null);
   const [usageOpen, setUsageOpen] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -315,7 +329,9 @@ export default function App() {
     setSecondaryFilter(null);
   };
 
-  const startSession = (next: DictionaryEntry[], name: string | null) => {
+  const startSession = (next: DictionaryEntry[], name: string | null, fromDrive = false) => {
+    // Drive以外から開いたセッションでは、競合確認の控えを引き継ぎません。
+    if (!fromDrive) clearDriveBaseline();
     setEntries(next);
     setFileName(name);
     setDirty(false);
@@ -345,6 +361,49 @@ export default function App() {
     } finally {
       setLoadingName(null);
     }
+  };
+
+  // Google Drive上の正本を開きます。読み込み中表示やエラー表示は、
+  // ファイルから開く場合と共通のものを使います。
+  const handleDriveOpen = async () => {
+    setLoadingName(MASTER_FILE_NAME);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    try {
+      const text = await driveOpenMaster();
+      const parsed = parseMasterTsv(text);
+      startSession(parsed, MASTER_FILE_NAME, true);
+    } catch (error) {
+      setLoadError(
+        `Google Driveから読み込めませんでした。${error instanceof Error ? error.message : ""}`,
+      );
+    } finally {
+      setLoadingName(null);
+    }
+  };
+
+  // 設定を開くたびに、Driveの接続状態（保存済みトークンの有効期限）を
+  // 確認し直します。
+  useEffect(() => {
+    if (settingsOpen) {
+      setDriveConnected(driveIsConnected());
+      setDriveSettingsError(null);
+    }
+  }, [settingsOpen]);
+
+  const handleDriveConnect = async () => {
+    setDriveSettingsError(null);
+    try {
+      await driveConnect();
+      setDriveConnected(true);
+    } catch (error) {
+      setDriveSettingsError(error instanceof Error ? error.message : "接続に失敗しました。");
+    }
+  };
+
+  const handleDriveDisconnect = () => {
+    driveDisconnect();
+    setDriveConnected(false);
+    setDriveSettingsError(null);
   };
 
   // 共有メニュー（Web Share Target）から開かれた場合は、Service Workerが
@@ -500,7 +559,9 @@ export default function App() {
             <h1>Word Shelf</h1>
             <p>IMEのユーザー辞書を、正本ファイル（DictionaryMaster.tsv）で管理するツールです。</p>
             <p className="start-save-line">
-              編集が終わったら、「出力」から正本ファイルをダウンロードしてください。正式な保存はそれだけです。
+              {driveIsConfigured()
+                ? "編集が終わったら、「出力」から正本ファイルをダウンロードするか、Google Driveに保存してください。正式な保存はそれだけです。"
+                : "編集が終わったら、「出力」から正本ファイルをダウンロードしてください。正式な保存はそれだけです。"}
             </p>
             <details className="start-details">
               <summary>使い方の詳しい説明</summary>
@@ -510,6 +571,11 @@ export default function App() {
               <button className="btn btn-brand" onClick={() => fileInputRef.current?.click()}>
                 正本ファイルを開く
               </button>
+              {driveIsConfigured() && (
+                <button className="btn" onClick={() => void handleDriveOpen()}>
+                  Google Driveから開く
+                </button>
+              )}
               <button className="btn" onClick={() => startSession([], null)}>
                 新規作成（空の辞書から）
               </button>
@@ -800,6 +866,32 @@ export default function App() {
             </div>
           </div>
           <div className="settings-section">
+            <div className="settings-label">Google Drive</div>
+            {driveIsConfigured() ? (
+              <>
+                <p className="settings-desc">
+                  {driveConnected
+                    ? `接続中${driveAccountHint() ? `（${driveAccountHint()}）` : ""}。開始画面からDrive上の正本を開けます。`
+                    : "未接続。接続すると、開始画面からDrive上の正本を開いたり、出力時にDriveへ保存したりできます。"}
+                </p>
+                {driveSettingsError && <div className="error-banner">{driveSettingsError}</div>}
+                {driveConnected ? (
+                  <button className="btn" onClick={handleDriveDisconnect}>
+                    接続を解除
+                  </button>
+                ) : (
+                  <button className="btn" onClick={() => void handleDriveConnect()}>
+                    Google Driveに接続
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="settings-desc">
+                クライアントIDが設定されていないため、利用できません。
+              </p>
+            )}
+          </div>
+          <div className="settings-section">
             <div className="settings-label">使い方</div>
             <p className="settings-desc">基本の流れや、保存についての注意を確認できます。</p>
             <button
@@ -959,12 +1051,15 @@ function ThemeToggle() {
 // 使い方の本文です。開始画面の詳しい説明と、設定メニューから開く
 // 「使い方」モーダルで同じ内容を使います。
 function UsageContent() {
+  const driveReady = driveIsConfigured();
   return (
     <div className="usage-body">
       <h3>基本の流れ</h3>
       <p>
         ファイルを開いて編集し、出力で正本とIME用辞書ファイルを書き出します。次回は、ダウンロードした正本ファイルをもう一度開いて続きを編集します。
         スマートフォンでは、ファイルアプリやGoogle Driveアプリの共有メニューで正本ファイルを選び、このアプリで開くこともできます。
+        {driveReady &&
+          "Google Driveに接続すると、開始画面からDrive上の正本を開いたり、出力のときにDriveへ保存したりもできます。"}
       </p>
       <h3>分類の付け方（任意）</h3>
       <p>
@@ -973,7 +1068,9 @@ function UsageContent() {
       </p>
       <h3>⚠ 重要: 保存について</h3>
       <p>
-        正式な保存は、正本ファイルのダウンロードだけです。編集中の内容はこの端末に自動で一時退避され、リロードや開き直しをしても、次に開いたときに復元するか聞かれます。ただし一時退避はブラウザの都合で消えることもある保険なので、編集が終わったら必ず正本をダウンロードしてください。
+        {driveReady
+          ? "正式な保存は、正本ファイルのダウンロード、またはGoogle Driveへの保存だけです。編集中の内容はこの端末に自動で一時退避され、リロードや開き直しをしても、次に開いたときに復元するか聞かれます。ただし一時退避はブラウザの都合で消えることもある保険なので、編集が終わったら必ず正本をダウンロードするか、Driveに保存してください。"
+          : "正式な保存は、正本ファイルのダウンロードだけです。編集中の内容はこの端末に自動で一時退避され、リロードや開き直しをしても、次に開いたときに復元するか聞かれます。ただし一時退避はブラウザの都合で消えることもある保険なので、編集が終わったら必ず正本をダウンロードしてください。"}
       </p>
     </div>
   );
@@ -1261,6 +1358,10 @@ function ExportModal({
 }) {
   const [includeGoogle, setIncludeGoogle] = useState(true);
   const [includeMs, setIncludeMs] = useState(true);
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveSaved, setDriveSaved] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const [driveConflictAt, setDriveConflictAt] = useState<string | null>(null);
 
   const masterText = useMemo(() => serializeMasterTsv(entries), [entries]);
   const googleText = useMemo(() => serializeGoogleIme(entries), [entries]);
@@ -1276,6 +1377,50 @@ function ExportModal({
     }
     if (includeMs) {
       download("Dictionary_MicrosoftIME.txt", msResult.bytes, "application/octet-stream");
+    }
+  };
+
+  // Driveへの保存もダウンロードと同じ正式な保存です。正本は常時含み、
+  // IME用ファイルはチェックしたものだけを同じフォルダへ保存します。
+  // Drive側の正本が開いた後に変わっていた場合は、まず競合を知らせて
+  // 上書きの確認を取ります。
+  const saveToDrive = async (force: boolean) => {
+    setDriveBusy(true);
+    setDriveSaved(false);
+    setDriveError(null);
+    try {
+      const files = [
+        {
+          name: "DictionaryMaster.tsv",
+          body: new Blob([masterText], { type: "text/tab-separated-values" }),
+        },
+      ];
+      if (includeGoogle) {
+        files.push({
+          name: "Dictionary_GoogleIME.txt",
+          body: new Blob([googleText], { type: "text/plain" }),
+        });
+      }
+      if (includeMs) {
+        files.push({
+          name: "Dictionary_MicrosoftIME.txt",
+          body: new Blob([msResult.bytes as BlobPart], { type: "application/octet-stream" }),
+        });
+      }
+      await driveSaveFiles(files, { force });
+      setDriveConflictAt(null);
+      setDriveSaved(true);
+      onMasterExported();
+    } catch (error) {
+      if (error instanceof DriveConflictError) {
+        setDriveConflictAt(error.remoteModifiedTime);
+      } else {
+        setDriveError(
+          `Google Driveに保存できませんでした。${error instanceof Error ? error.message : ""}`,
+        );
+      }
+    } finally {
+      setDriveBusy(false);
     }
   };
 
@@ -1332,10 +1477,41 @@ function ExportModal({
         </details>
       </div>
 
+      {driveConflictAt && (
+        <div className="error-banner">
+          Google Drive上の正本が、開いた後に変更されています（更新:{" "}
+          {new Date(driveConflictAt).toLocaleString("ja-JP")}
+          ）。この内容で上書きしてよいですか？
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setDriveConflictAt(null)}>
+              キャンセル
+            </button>
+            <button
+              className="btn btn-danger"
+              disabled={driveBusy}
+              onClick={() => void saveToDrive(true)}
+            >
+              上書きして保存
+            </button>
+          </div>
+        </div>
+      )}
+      {driveError && <div className="error-banner">{driveError}</div>}
+      {driveSaved && <p className="settings-desc">Google Driveに保存しました。</p>}
+
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           閉じる
         </button>
+        {driveIsConfigured() && (
+          <button
+            className="btn btn-brand"
+            disabled={driveBusy}
+            onClick={() => void saveToDrive(false)}
+          >
+            {driveBusy ? "保存しています…" : "Google Driveに保存"}
+          </button>
+        )}
         <button className="btn btn-gold" onClick={downloadAll}>
           まとめてダウンロード
         </button>
