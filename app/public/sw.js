@@ -5,7 +5,7 @@
 // 正本（Single Source of Truth）です。設定画面のバージョン表記は、
 // この値から動的に抽出して表示します。ファイル追加やロジック変更など、
 // アプリの更新を配るときは、必ずこの文字列を更新してください。
-const CACHE_NAME = "word-shelf-2026.11-r4";
+const CACHE_NAME = "word-shelf-2026.11-r5";
 
 // 共有メニュー（Web Share Target）で受け取ったファイルの一時置き場です。
 // 名前は src/core/shared-file.ts の SHARE_CACHE_NAME と揃えてください。

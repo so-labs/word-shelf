@@ -905,6 +905,11 @@ export default function App() {
             </button>
           </div>
           <div className="settings-version">Ver. {appVersion ?? "-"}</div>
+          <div className="settings-privacy">
+            <a href="./privacy.html" target="_blank" rel="noopener noreferrer">
+              プライバシーポリシー
+            </a>
+          </div>
         </Modal>
       )}
 

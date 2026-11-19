@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>プライバシーポリシー | Word Shelf</title>
+  <script>
+    // アプリで選んだテーマ（word-shelf:theme）とOSの配色を描画前に読み、
+    // ダークテーマのときに白く光らないようにします。
+    try {
+      var saved = localStorage.getItem("word-shelf:theme");
+      var dark =
+        saved === "dark" ||
+        ((saved === null || saved === "system") &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
+      if (dark) document.documentElement.dataset.theme = "dark";
+    } catch (e) {
+      // テーマが決められない場合はライトテーマで表示します
+    }
+  </script>
+  <style>
+    body {
+      margin: 0;
+      background: #f6f4ee;
+      color: #1c2b3a;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.8;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    h1 {
+      font-size: 24px;
+      color: #1f3a5f;
+    }
+
+    h2 {
+      font-size: 17px;
+      margin-top: 32px;
+    }
+
+    p,
+    li {
+      font-size: 15px;
+    }
+
+    a {
+      color: #1f3a5f;
+    }
+
+    .date {
+      color: #5a6a7a;
+      font-size: 13px;
+    }
+
+    html[data-theme="dark"] body {
+      background: #0d141d;
+      color: #ece7da;
+    }
+
+    html[data-theme="dark"] h1 {
+      color: #ecd28a;
+    }
+
+    html[data-theme="dark"] a {
+      color: #a9c3e2;
+    }
+
+    html[data-theme="dark"] .date {
+      color: #9aa7b4;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>プライバシーポリシー</h1>
+    <p class="date">
+      Word Shelf（https://so-labs.github.io/word-shelf/）におけるデータの取り扱いについて説明します。制定日:
+      2026年11月19日
+    </p>
+
+    <h2>基本方針</h2>
+    <p>
+      Word Shelf
+      は個人向けのWebアプリで、運営者が利用者のデータを収集するサーバーは持ちません。辞書データは、利用者ご自身の端末と、利用者ご自身のファイルやクラウドストレージにのみ保存されます。アクセス解析ツールや広告も使用していません。
+    </p>
+
+    <h2>ブラウザ内への保存</h2>
+    <p>
+      辞書データは、開いたファイルそのものを正本として扱い、アプリ内に恒常的には保存しません。編集中の内容は、作業コピーとしてブラウザ内（IndexedDB）に一時退避され、リロードや開き直しのときに復元するか確認されます。テーマなどの設定と、Google
+      Drive連携の接続情報は、ブラウザの localStorage に保存されます。これらが運営者や第三者に送信されることはありません。ブラウザのデータを消去すると、これらのデータも消えます。
+    </p>
+
+    <h2>Google Drive 連携（任意機能）</h2>
+    <p>Google Drive連携は任意の機能で、利用者が接続した場合にのみ動作します。</p>
+    <ul>
+      <li>
+        接続時に、Google Drive
+        のうち「このアプリが作成したファイル」へのアクセス許可（スコープ: drive.file）と、メールアドレスの表示を求めます。アプリが作成した「Word
+        Shelf」フォルダとその中のファイル以外にはアクセスしません。メールアドレスは、次回接続時にアカウント選択を省くための控えとして、利用者のブラウザ内にだけ保存します（運営者に送信されることはありません）。
+      </li>
+      <li>
+        保存と読み込みは、利用者が「Google Driveに保存」「Google Driveから開く」などのボタンを押したときだけ行い、データはブラウザから Google Drive
+        へ直接送受信されます。運営者のサーバーを経由することはありません。
+      </li>
+      <li>
+        保存されるのは、正本ファイル（DictionaryMaster.tsv）と、利用者が選択したIME用辞書ファイルです。
+      </li>
+      <li>
+        認証に使うアクセストークンは、有効期限（最大1時間）の間だけ利用者のブラウザ内に保存し、アプリを開き直したときの再認証を省くために使います。有効期限が切れたものは破棄され、接続を解除したときにも消去されます。運営者に送信されることはありません。
+      </li>
+      <li>
+        運営者が、利用者の Drive 内のデータにアクセスすることはできません。フォルダとファイルは、Google Drive 上で利用者ご自身が削除できます。
+      </li>
+    </ul>
+
+    <h2>共有メニューから開いたファイル</h2>
+    <p>
+      スマートフォンの共有メニューでこのアプリへ送られたファイルは、端末のブラウザ内でのみ処理されます。運営者や第三者に送信されることはありません。
+    </p>
+
+    <h2>データの書き出し</h2>
+    <p>
+      辞書データは、いつでも正本ファイルとIME用辞書ファイルとしてダウンロードできます。クラウド連携を使わなくても、ファイルによる保存と端末間の受け渡しが可能です。
+    </p>
+
+    <h2>お問い合わせ</h2>
+    <p>
+      本ポリシーやアプリに関するお問い合わせは、公開リポジトリ
+      <a href="https://github.com/so-labs/word-shelf">github.com/so-labs/word-shelf</a>
+      からお願いします。
+    </p>
+
+    <p><a href="./">Word Shelf に戻る</a></p>
+  </main>
+</body>
+
+</html>
