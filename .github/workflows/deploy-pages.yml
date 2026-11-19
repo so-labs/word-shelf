@@ -26,6 +26,8 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - name: Install, test and build
         working-directory: app
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: |
           npm ci
           npm test
