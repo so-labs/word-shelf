@@ -4,6 +4,7 @@ import { parseMasterTsv, serializeMasterTsv } from "./core/master-tsv";
 import { serializeMicrosoftIme } from "./core/microsoft-ime";
 import { PARTS_OF_SPEECH, toMsImeConversion } from "./core/pos";
 import type { DictionaryEntry } from "./core/types";
+import { loadSharedFile } from "./core/shared-file";
 import { clearWorkCopy, loadWorkCopy, saveWorkCopy, type WorkCopy } from "./core/work-copy";
 
 // 既定の並び順: 分類（Primary→Secondary）→読み順
@@ -345,6 +346,23 @@ export default function App() {
       setLoadingName(null);
     }
   };
+
+  // 共有メニュー（Web Share Target）から開かれた場合は、Service Workerが
+  // 一時置きしたファイルを起動時に1回だけ受け取って開きます。通常の
+  // ファイル読み込みと同じ扱いにし、辞書を開いていた場合は handleFile
+  // 側の確認モーダルに委ねます。目印のクエリはその場で消します。
+  const sharedHandledRef = useRef(false);
+  useEffect(() => {
+    if (sharedHandledRef.current) return;
+    if (!new URLSearchParams(window.location.search).has("shared")) return;
+    sharedHandledRef.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    void loadSharedFile().then((file) => {
+      if (file) void handleFile(file);
+    });
+    // 起動時に1回だけ処理するため、依存配列は空にします
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const primaries = useMemo(() => {
     if (!entries) return [];
@@ -946,6 +964,7 @@ function UsageContent() {
       <h3>基本の流れ</h3>
       <p>
         ファイルを開いて編集し、出力で正本とIME用辞書ファイルを書き出します。次回は、ダウンロードした正本ファイルをもう一度開いて続きを編集します。
+        スマートフォンでは、ファイルアプリやGoogle Driveアプリの共有メニューで正本ファイルを選び、このアプリで開くこともできます。
       </p>
       <h3>分類の付け方（任意）</h3>
       <p>
