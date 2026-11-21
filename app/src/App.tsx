@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { serializeGoogleIme } from "./core/google-ime";
 import { parseDictionaryFile } from "./core/import";
 import { parseMasterTsv, serializeMasterTsv } from "./core/master-tsv";
@@ -31,6 +31,7 @@ import {
   selectAiExamples,
 } from "./core/ai-prompt";
 import { findSimilarEntries } from "./core/similar";
+import { buildOffsets, findVisibleRange } from "./core/virtual";
 import { loadSharedFile } from "./core/shared-file";
 import {
   findUnsavedEntries,
@@ -65,6 +66,11 @@ function searchRank(entry: DictionaryEntry, query: string): number {
 function isExcludedFromMs(pos: string): boolean {
   return toMsImeConversion(pos)?.kind === "excluded";
 }
+
+// 仮想スクロールで、まだ測れていないカードの高さの推定値（カード＋間隔）と、
+// 画面の上下に余分に描画しておく幅です。
+const ESTIMATED_CARD_HEIGHT = 120;
+const VIRTUAL_OVERSCAN_PX = 600;
 
 // 品詞のMicrosoft IME向け変換の説明文です。
 function posNote(pos: string): { warn: boolean; text: string } {
@@ -550,6 +556,94 @@ export default function App() {
   // 別枠を出している間は、通常の一覧から未保存分を除いて二重表示を避けます。
   const mainView = isFiltering ? view : view.filter(({ entry }) => !unsavedSet.has(entry));
 
+  // 一覧は仮想スクロールで描画します。全件分のカードをDOMに置くと、
+  // 低性能の端末ではどの操作でも再描画が重くなるため、画面の近くの
+  // カードだけを描きます。カードの高さは、描画したものの実測を使います。
+  const [scrollTop, setScrollTop] = useState(() => window.scrollY);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  const [listTop, setListTop] = useState(0);
+  const [, setMeasureVersion] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const heightsRef = useRef(new Map<number, number>());
+
+  // スクロール位置と画面の高さを追います。スクロールはフレーム単位に
+  // 間引いて、再描画が増えすぎないようにします。
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        setScrollTop(window.scrollY);
+      });
+    };
+    const onResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+
+  // 一覧の先頭の位置（ページ上端からの距離）を測ります。一覧より上の
+  // 内容（未保存の別枠など）が変わると位置も変わるため、描画のたびに
+  // 確認します。
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    setListTop((prev) => (Math.abs(prev - top) > 0.5 ? top : prev));
+  });
+
+  // 検索・絞り込みが変わったら、先頭から見直します。
+  useEffect(() => {
+    heightsRef.current.clear();
+    setMeasureVersion((version) => version + 1);
+    window.scrollTo({ top: 0 });
+  }, [query, primaryFilter, secondaryFilter]);
+
+  // データが変わったら高さを測り直します（スクロール位置は保ちます）。
+  useEffect(() => {
+    heightsRef.current.clear();
+    setMeasureVersion((version) => version + 1);
+  }, [entries]);
+
+  // 描画したカードの高さを実測し、変わったものがあれば位置を計算し直します。
+  useEffect(() => {
+    const root = listRef.current;
+    if (!root) return;
+    const observer = new ResizeObserver((hits) => {
+      let changed = false;
+      for (const hit of hits) {
+        const target = hit.target as HTMLElement;
+        const index = Number(target.dataset.cardIndex);
+        if (!Number.isFinite(index)) continue;
+        if (heightsRef.current.get(index) !== target.offsetHeight) {
+          heightsRef.current.set(index, target.offsetHeight);
+          changed = true;
+        }
+      }
+      if (changed) setMeasureVersion((version) => version + 1);
+    });
+    root
+      .querySelectorAll<HTMLElement>("[data-card-index]")
+      .forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  });
+
+  const cardOffsets = buildOffsets(
+    mainView.map((_, index) => heightsRef.current.get(index) ?? ESTIMATED_CARD_HEIGHT),
+  );
+  const totalListHeight = cardOffsets[cardOffsets.length - 1];
+  const visibleRange = findVisibleRange(
+    cardOffsets,
+    scrollTop - listTop - VIRTUAL_OVERSCAN_PX,
+    scrollTop + viewportHeight - listTop + VIRTUAL_OVERSCAN_PX,
+  );
+  const visibleItems = mainView.slice(visibleRange.start, visibleRange.end);
+
   const saveForm = (entry: DictionaryEntry) => {
     if (!form) return;
     if (form.kind === "edit") {
@@ -792,7 +886,22 @@ export default function App() {
                 : "条件に合う登録がありません。検索や絞り込みを変えてみてください。"}
             </div>
           ) : mainView.length === 0 ? null : (
-            <div className="card-list">{mainView.map(renderCard)}</div>
+            <div
+              className="card-list virtual-list"
+              ref={listRef}
+              style={{ height: totalListHeight }}
+            >
+              {visibleItems.map((item, i) => (
+                <div
+                  key={item.index}
+                  className="virtual-slot"
+                  data-card-index={visibleRange.start + i}
+                  style={{ transform: `translateY(${cardOffsets[visibleRange.start + i]}px)` }}
+                >
+                  {renderCard(item)}
+                </div>
+              ))}
+            </div>
           )}
 
           {showTopButton && (
