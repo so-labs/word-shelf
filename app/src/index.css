@@ -557,6 +557,20 @@ textarea {
   text-align: right;
 }
 
+.similar-note {
+  background: var(--note-bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.similar-note ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
 .ai-help-actions {
   display: flex;
   flex-wrap: wrap;

@@ -29,6 +29,7 @@ import {
   buildClaudeUrl,
   selectAiExamples,
 } from "./core/ai-prompt";
+import { findSimilarEntries } from "./core/similar";
 import { loadSharedFile } from "./core/shared-file";
 import {
   findUnsavedEntries,
@@ -1324,6 +1325,12 @@ function EntryForm({
 
   const excluded = isExcludedFromMs(fields.pos);
 
+  // 入力した単語と似た登録です。保存は妨げず、伝えるだけにします。
+  const similarEntries = useMemo(
+    () => findSimilarEntries(entries, fields.word, form.kind === "edit" ? form.index : null),
+    [entries, fields.word, form],
+  );
+
   // AIコメント提案: 参考例は、いま入力中の分類に合わせて選び直します。
   const aiExamples = useMemo(
     () =>
@@ -1456,6 +1463,18 @@ function EntryForm({
             onChange={(e) => set("word", e.target.value)}
             onFocus={() => setFocusedField(null)}
           />
+          {similarEntries.length > 0 && (
+            <div className="similar-note">
+              似た登録があります
+              <ul>
+                {similarEntries.map((e, i) => (
+                  <li key={i}>
+                    {e.word}（{e.reading}／{e.pos}）
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         <div className="field">
           <label htmlFor="f-pos">品詞</label>
