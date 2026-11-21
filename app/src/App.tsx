@@ -22,6 +22,13 @@ import {
   parseExportTargets,
   type ExportTargets,
 } from "./core/export-targets";
+import {
+  AI_PROMPT_NOTICE_KEY,
+  buildAiPrompt,
+  buildChatGptUrl,
+  buildClaudeUrl,
+  selectAiExamples,
+} from "./core/ai-prompt";
 import { loadSharedFile } from "./core/shared-file";
 import {
   findUnsavedEntries,
@@ -161,6 +168,9 @@ type FormState =
   | { kind: "new"; initial: DictionaryEntry }
   | { kind: "duplicate"; initial: DictionaryEntry }
   | { kind: "edit"; index: number; initial: DictionaryEntry };
+
+// AIコメント提案の実行内容です。コピーするか、AIを開く（URL付き）か。
+type AiAction = { kind: "copy" } | { kind: "open"; url: string };
 
 export default function App() {
   const [entries, setEntries] = useState<DictionaryEntry[] | null>(null);
@@ -867,6 +877,7 @@ export default function App() {
         <EntryForm
           key={`${form.kind}-${form.kind === "edit" ? form.index : "new"}`}
           form={form}
+          entries={entries ?? []}
           primaries={primaries.map((p) => p.name)}
           secondaries={allSecondaries}
           secondariesByPrimary={secondariesByPrimary}
@@ -1225,6 +1236,7 @@ function Modal({
 
 function EntryForm({
   form,
+  entries,
   primaries,
   secondaries,
   secondariesByPrimary,
@@ -1232,6 +1244,7 @@ function EntryForm({
   onClose,
 }: {
   form: FormState;
+  entries: DictionaryEntry[];
   primaries: string[];
   secondaries: string[];
   secondariesByPrimary: Map<string, string[]>;
@@ -1241,6 +1254,17 @@ function EntryForm({
   const [fields, setFields] = useState<DictionaryEntry>(form.initial);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState(false);
+  // AIコメント提案の開閉、コピー完了の表示、送る前の注意喚起の状態です。
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiCopied, setAiCopied] = useState(false);
+  const [aiNoticeAction, setAiNoticeAction] = useState<AiAction | null>(null);
+  const [aiNoticeMute, setAiNoticeMute] = useState(false);
+  // 「コピーしました」の表示は、数秒たったら自動で消します。
+  useEffect(() => {
+    if (!aiCopied) return;
+    const timer = window.setTimeout(() => setAiCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [aiCopied]);
   const [showNote, setShowNote] = useState(isExcludedFromMs(form.initial.pos));
   useTooltipClose(showNote, () => setShowNote(false));
   const [focusedField, setFocusedField] = useState<"primary" | "secondary" | null>(null);
@@ -1300,125 +1324,299 @@ function EntryForm({
 
   const excluded = isExcludedFromMs(fields.pos);
 
+  // AIコメント提案: 参考例は、いま入力中の分類に合わせて選び直します。
+  const aiExamples = useMemo(
+    () =>
+      selectAiExamples(
+        entries,
+        { primary: fields.primary, secondary: fields.secondary },
+        form.initial,
+      ),
+    [entries, fields.primary, fields.secondary, form.initial],
+  );
+  const aiPrompt = useMemo(
+    () => buildAiPrompt(fields.word.trim(), aiExamples),
+    [fields.word, aiExamples],
+  );
+  const aiWordMissing = fields.word.trim() === "";
+  // プレビューで編集したプロンプトです。未編集の間は生成結果に追従し、
+  // 編集を始めたら、単語や分類を変えても上書きしません（作り直すで戻せます）。
+  const [aiPromptText, setAiPromptText] = useState<string | null>(null);
+  const displayedPrompt = aiPromptText ?? aiPrompt;
+  const aiPromptEdited = aiPromptText !== null && aiPromptText !== aiPrompt;
+
+  const copyText = async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // クリップボードAPIが使えない環境向けの代替手段です。
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+      document.body.removeChild(ta);
+      return ok;
+    }
+  };
+
+  const runAiAction = async (action: AiAction) => {
+    if (action.kind === "copy") {
+      if (await copyText(displayedPrompt)) setAiCopied(true);
+    } else {
+      // 開き先でプロンプトが渡らなかった場合に備え、コピーもしておきます。
+      await copyText(displayedPrompt);
+      window.open(action.url, "_blank", "noopener");
+    }
+  };
+
+  // 初回は、参考例に個人情報が含まれ得ることの注意喚起を挟みます。
+  const requestAiAction = (action: AiAction) => {
+    let muted = false;
+    try {
+      muted = localStorage.getItem(AI_PROMPT_NOTICE_KEY) === "muted";
+    } catch {
+      muted = false;
+    }
+    if (muted) {
+      void runAiAction(action);
+    } else {
+      setAiNoticeMute(false);
+      setAiNoticeAction(action);
+    }
+  };
+
+  const confirmAiNotice = () => {
+    if (aiNoticeMute) {
+      try {
+        localStorage.setItem(AI_PROMPT_NOTICE_KEY, "muted");
+      } catch {
+        // 保存できなくても動作は続けます（毎回表示されるだけです）。
+      }
+    }
+    const action = aiNoticeAction;
+    setAiNoticeAction(null);
+    if (action) void runAiAction(action);
+  };
+
   return (
-    <Modal title={title} onClose={onClose}>
-      {notice && (
-        <div className="form-notice">
-          保存しました。いまの内容を引き継いでいます。書き換える欄だけ直して、次の登録ができます。
+    <>
+      <Modal title={title} onClose={onClose}>
+        {notice && (
+          <div className="form-notice">
+            保存しました。いまの内容を引き継いでいます。書き換える欄だけ直して、次の登録ができます。
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="f-primary">分類（Primary）</label>
+          <input
+            id="f-primary"
+            placeholder="例: 人名、暮らし、仕事"
+            value={fields.primary}
+            onChange={(e) => set("primary", e.target.value)}
+            onFocus={() => setFocusedField("primary")}
+          />
+          {suggestionChips("primary", primarySuggestions)}
+          <div className="field-hint">大きな分類です。一覧のチップで絞り込む軸になります。</div>
         </div>
-      )}
-      <div className="field">
-        <label htmlFor="f-primary">分類（Primary）</label>
-        <input
-          id="f-primary"
-          placeholder="例: 人名、暮らし、仕事"
-          value={fields.primary}
-          onChange={(e) => set("primary", e.target.value)}
-          onFocus={() => setFocusedField("primary")}
-        />
-        {suggestionChips("primary", primarySuggestions)}
-        <div className="field-hint">大きな分類です。一覧のチップで絞り込む軸になります。</div>
-      </div>
-      <div className="field">
-        <label htmlFor="f-secondary">分類（Secondary）</label>
-        <input
-          id="f-secondary"
-          placeholder="例: 歴史上の人物、料理、ソフトウェア"
-          value={fields.secondary}
-          onChange={(e) => set("secondary", e.target.value)}
-          onFocus={() => setFocusedField("secondary")}
-        />
-        {suggestionChips("secondary", secondarySuggestions)}
-        <div className="field-hint">Primaryの中の小分類です。絞り込みシートで選べます。</div>
-      </div>
-      <div className="field">
-        <label htmlFor="f-reading">読み</label>
-        <input
-          id="f-reading"
-          value={fields.reading}
-          onChange={(e) => set("reading", e.target.value)}
-          onFocus={() => setFocusedField(null)}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="f-word">単語</label>
-        <input
-          id="f-word"
-          value={fields.word}
-          onChange={(e) => set("word", e.target.value)}
-          onFocus={() => setFocusedField(null)}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="f-pos">品詞</label>
-        <div className="pos-wrap">
-          <div className="pos-row">
-            <select
-              id="f-pos"
-              value={fields.pos}
-              onChange={(e) => {
-                set("pos", e.target.value);
-                if (isExcludedFromMs(e.target.value)) setShowNote(true);
+        <div className="field">
+          <label htmlFor="f-secondary">分類（Secondary）</label>
+          <input
+            id="f-secondary"
+            placeholder="例: 歴史上の人物、料理、ソフトウェア"
+            value={fields.secondary}
+            onChange={(e) => set("secondary", e.target.value)}
+            onFocus={() => setFocusedField("secondary")}
+          />
+          {suggestionChips("secondary", secondarySuggestions)}
+          <div className="field-hint">Primaryの中の小分類です。絞り込みシートで選べます。</div>
+        </div>
+        <div className="field">
+          <label htmlFor="f-reading">読み</label>
+          <input
+            id="f-reading"
+            value={fields.reading}
+            onChange={(e) => set("reading", e.target.value)}
+            onFocus={() => setFocusedField(null)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="f-word">単語</label>
+          <input
+            id="f-word"
+            value={fields.word}
+            onChange={(e) => set("word", e.target.value)}
+            onFocus={() => setFocusedField(null)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="f-pos">品詞</label>
+          <div className="pos-wrap">
+            <div className="pos-row">
+              <select
+                id="f-pos"
+                value={fields.pos}
+                onChange={(e) => {
+                  set("pos", e.target.value);
+                  if (isExcludedFromMs(e.target.value)) setShowNote(true);
+                }}
+              >
+                {PARTS_OF_SPEECH.map((pos) => (
+                  <option key={pos} value={pos}>
+                    {pos}
+                    {isExcludedFromMs(pos) ? " ⚠" : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={`pos-note-toggle${excluded ? " warn" : ""}`}
+                data-pos-note
+                aria-label="品詞の変換についての注記を開く"
+                aria-expanded={showNote}
+                onClick={() => setShowNote((prev) => !prev)}
+              >
+                {excluded ? "⚠" : "？"}
+              </button>
+            </div>
+            {showNote && <PosNote pos={fields.pos} tooltip />}
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="f-comment">コメント</label>
+          <textarea
+            id="f-comment"
+            value={fields.comment}
+            onChange={(e) => set("comment", e.target.value)}
+          />
+        </div>
+        <div className="ai-help">
+          <button
+            type="button"
+            className="ai-help-toggle"
+            aria-expanded={aiOpen}
+            onClick={() => setAiOpen((prev) => !prev)}
+          >
+            AIにコメントを提案してもらう {aiOpen ? "▲" : "▼"}
+          </button>
+          {aiOpen && (
+            <div className="ai-help-body">
+              <p className="ai-help-note">外部のAIに聞くためのプロンプトを作ります。</p>
+              <textarea
+                className="ai-prompt-edit"
+                rows={9}
+                value={aiWordMissing ? "" : displayedPrompt}
+                placeholder="（単語を入力すると表示されます）"
+                disabled={aiWordMissing}
+                onChange={(e) => setAiPromptText(e.target.value)}
+                aria-label="AIへ渡すプロンプト（編集できます）"
+              />
+              {aiPromptEdited && (
+                <div className="ai-help-reset">
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => setAiPromptText(null)}
+                  >
+                    プロンプトを作り直す
+                  </button>
+                </div>
+              )}
+              <div className="ai-help-actions">
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={aiWordMissing}
+                  onClick={() => requestAiAction({ kind: "copy" })}
+                >
+                  プロンプトをコピー
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={aiWordMissing}
+                  onClick={() =>
+                    requestAiAction({ kind: "open", url: buildChatGptUrl(displayedPrompt) })
+                  }
+                >
+                  ChatGPTで開く
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={aiWordMissing}
+                  onClick={() =>
+                    requestAiAction({ kind: "open", url: buildClaudeUrl(displayedPrompt) })
+                  }
+                >
+                  Claudeで開く
+                </button>
+              </div>
+              {aiCopied && <div className="form-notice">コピーしました。</div>}
+            </div>
+          )}
+        </div>
+        {error && <div className="field-error">{error}</div>}
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>
+            キャンセル
+          </button>
+          {form.kind !== "edit" && (
+            <button
+              className="btn btn-gold"
+              onClick={() => {
+                if (!validate()) return;
+                onSave(fields);
+                setNotice(true);
               }}
             >
-              {PARTS_OF_SPEECH.map((pos) => (
-                <option key={pos} value={pos}>
-                  {pos}
-                  {isExcludedFromMs(pos) ? " ⚠" : ""}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className={`pos-note-toggle${excluded ? " warn" : ""}`}
-              data-pos-note
-              aria-label="品詞の変換についての注記を開く"
-              aria-expanded={showNote}
-              onClick={() => setShowNote((prev) => !prev)}
-            >
-              {excluded ? "⚠" : "？"}
+              保存して続けて登録
             </button>
-          </div>
-          {showNote && <PosNote pos={fields.pos} tooltip />}
-        </div>
-      </div>
-      <div className="field">
-        <label htmlFor="f-comment">コメント</label>
-        <textarea
-          id="f-comment"
-          value={fields.comment}
-          onChange={(e) => set("comment", e.target.value)}
-        />
-      </div>
-      {error && <div className="field-error">{error}</div>}
-      <div className="modal-actions">
-        <button className="btn" onClick={onClose}>
-          キャンセル
-        </button>
-        {form.kind !== "edit" && (
+          )}
           <button
-            className="btn btn-gold"
+            className="btn btn-brand"
             onClick={() => {
               if (!validate()) return;
               onSave(fields);
-              setNotice(true);
+              onClose();
             }}
           >
-            保存して続けて登録
+            保存
           </button>
-        )}
-        <button
-          className="btn btn-brand"
-          onClick={() => {
-            if (!validate()) return;
-            onSave(fields);
-            onClose();
-          }}
-        >
-          保存
-        </button>
-      </div>
-    </Modal>
+        </div>
+      </Modal>
+      {aiNoticeAction && (
+        <Modal title="AIに送る前の確認" onClose={() => setAiNoticeAction(null)}>
+          <p>
+            プロンプトには、参考例として他の登録の単語とコメントが含まれます。送りたくない情報（実名・住所など）があれば、プレビューで消してから開いてください。
+          </p>
+          <label className="export-check">
+            <input
+              type="checkbox"
+              checked={aiNoticeMute}
+              onChange={(e) => setAiNoticeMute(e.target.checked)}
+            />
+            次回から表示しない
+          </label>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setAiNoticeAction(null)}>
+              キャンセル
+            </button>
+            <button className="btn btn-brand" onClick={confirmAiNotice}>
+              確認して続ける
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 

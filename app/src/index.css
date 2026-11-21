@@ -509,6 +509,60 @@ textarea {
   white-space: nowrap;
 }
 
+/* AIコメント提案（編集フォーム内のアコーディオン） */
+.ai-help {
+  margin-bottom: 14px;
+}
+
+.ai-help-toggle {
+  background: none;
+  border: none;
+  color: var(--brand-text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.ai-help-body {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+}
+
+.ai-help-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.ai-prompt-edit {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  resize: vertical;
+}
+
+.ai-help-reset {
+  margin: -4px 0 8px;
+  text-align: right;
+}
+
+.ai-help-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .pos-tooltip {
   position: absolute;
   z-index: 6;
