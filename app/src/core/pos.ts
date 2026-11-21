@@ -123,3 +123,18 @@ export function toMsImeConversion(pos: string): MsImeConversion | undefined {
   if (!isPartOfSpeech(pos)) return undefined;
   return MS_IME_CONVERSION[pos];
 }
+
+// Microsoft IMEの品詞名から正本の品詞を引きます（MS_IME_CONVERSIONの逆引き
+// で、Microsoft IME形式の取り込みに使います）。複数の正本の品詞が同じ
+// MS品詞に対応する場合は、そのまま対応するもの（direct）を優先し、
+// それでも複数ある場合は PARTS_OF_SPEECH の並び順で先のものを返します。
+// 対応が分からない品詞名の場合は undefined を返します。
+export function fromMsImePos(msPos: string): PartOfSpeech | undefined {
+  for (const kind of ["direct", "mapped"] as const) {
+    for (const pos of PARTS_OF_SPEECH) {
+      const conversion = MS_IME_CONVERSION[pos];
+      if (conversion.kind === kind && conversion.msPos === msPos) return pos;
+    }
+  }
+  return undefined;
+}

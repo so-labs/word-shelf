@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { serializeGoogleIme } from "./core/google-ime";
+import { parseDictionaryFile } from "./core/import";
 import { parseMasterTsv, serializeMasterTsv } from "./core/master-tsv";
 import { serializeMicrosoftIme } from "./core/microsoft-ime";
 import { PARTS_OF_SPEECH, toMsImeConversion } from "./core/pos";
@@ -247,6 +248,8 @@ export default function App() {
   const [pendingImport, setPendingImport] = useState<{
     name: string;
     entries: DictionaryEntry[];
+    formatLabel: string;
+    note: string | null;
   } | null>(null);
 
   const [query, setQuery] = useState("");
@@ -390,12 +393,19 @@ export default function App() {
     setLoadingName(file.name);
     await new Promise((resolve) => setTimeout(resolve, 80));
     try {
-      const text = await file.text();
-      const parsed = parseMasterTsv(text);
+      // 正本以外の形式（Google日本語入力、Microsoft IME、Gboard）も、
+      // 形式を自動判定して取り込みます。
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const imported = await parseDictionaryFile(bytes, file.name);
       if (entries !== null) {
-        setPendingImport({ name: file.name, entries: parsed });
+        setPendingImport({
+          name: file.name,
+          entries: imported.entries,
+          formatLabel: imported.formatLabel,
+          note: imported.note,
+        });
       } else {
-        startSession(parsed, file.name);
+        startSession(imported.entries, file.name);
       }
     } catch (error) {
       setLoadError(
@@ -653,7 +663,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".tsv,.txt,text/tab-separated-values"
+        accept=".tsv,.txt,.zip,text/tab-separated-values,application/zip"
         style={{ display: "none" }}
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -679,7 +689,7 @@ export default function App() {
             </details>
             <div className="start-actions">
               <button className="btn btn-brand" onClick={() => fileInputRef.current?.click()}>
-                正本ファイルを開く
+                ファイルを開く
               </button>
               {driveIsConfigured() && (
                 <button className="btn" onClick={() => void handleDriveOpen()}>
@@ -915,6 +925,10 @@ export default function App() {
             {pendingImport.entries.length}件）を開きます。
             {dirty && "未出力の変更は失われます。"}
           </p>
+          <p>
+            形式: {pendingImport.formatLabel}
+            {pendingImport.note && <>。{pendingImport.note}</>}
+          </p>
           <div className="modal-actions">
             <button className="btn" onClick={() => setPendingImport(null)}>
               キャンセル
@@ -1148,7 +1162,7 @@ function UsageContent() {
       <h3>基本の流れ</h3>
       <p>
         ファイルを開いて編集し、出力で正本とIME用辞書ファイルを書き出します。次回は、ダウンロードした正本ファイルをもう一度開いて続きを編集します。
-        スマートフォンでは、ファイルアプリやGoogle Driveアプリの共有メニューで正本ファイルを選び、このアプリで開くこともできます。
+        スマートフォンでは、ファイルアプリやGoogle Driveアプリの共有メニューで辞書ファイルを選び、このアプリで開くこともできます。
         {driveReady &&
           "Google Driveに接続すると、開始画面からDrive上の正本を開いたり、出力のときにDriveへ保存したりもできます。"}
       </p>
