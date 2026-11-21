@@ -1284,7 +1284,9 @@ function EntryForm({
     const timer = window.setTimeout(() => setAiCopied(false), 2000);
     return () => window.clearTimeout(timer);
   }, [aiCopied]);
-  const [showNote, setShowNote] = useState(isExcludedFromMs(form.initial.pos));
+  // 品詞の注記は、最初は閉じておき、ボタンで開いたときだけ表示します
+  // （開いた状態で始まると、ボタンの開閉の向きと合わず混乱するため）。
+  const [showNote, setShowNote] = useState(false);
   useTooltipClose(showNote, () => setShowNote(false));
   const [focusedField, setFocusedField] = useState<"primary" | "secondary" | null>(null);
 
@@ -1514,7 +1516,6 @@ function EntryForm({
                 value={fields.pos}
                 onChange={(e) => {
                   set("pos", e.target.value);
-                  if (isExcludedFromMs(e.target.value)) setShowNote(true);
                 }}
               >
                 {PARTS_OF_SPEECH.map((pos) => (
