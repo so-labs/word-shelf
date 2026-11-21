@@ -17,6 +17,21 @@ describe("作業コピーの形チェック", () => {
     assert.equal(isWorkCopy({ entries: [], fileName: null, savedAt: "x" }), true);
   });
 
+  it("未保存キーの控えがあっても受け付け、型が違えば退避として扱わない", () => {
+    assert.equal(
+      isWorkCopy({ entries: [], fileName: null, savedAt: "x", unsavedKeys: ["k1", "k2"] }),
+      true,
+    );
+    assert.equal(
+      isWorkCopy({ entries: [], fileName: null, savedAt: "x", unsavedKeys: [1] }),
+      false,
+    );
+    assert.equal(
+      isWorkCopy({ entries: [], fileName: null, savedAt: "x", unsavedKeys: "k" }),
+      false,
+    );
+  });
+
   it("壊れた値は退避として扱わない", () => {
     assert.equal(isWorkCopy(null), false);
     assert.equal(isWorkCopy({}), false);

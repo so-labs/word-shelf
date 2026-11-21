@@ -23,6 +23,11 @@ import {
   type ExportTargets,
 } from "./core/export-targets";
 import { loadSharedFile } from "./core/shared-file";
+import {
+  findUnsavedEntries,
+  savedBaselineFromKeys,
+  unsavedContentKeys,
+} from "./core/unsaved";
 import { clearWorkCopy, loadWorkCopy, saveWorkCopy, type WorkCopy } from "./core/work-copy";
 
 // 既定の並び順: 分類（Primary→Secondary）→読み順
@@ -161,6 +166,9 @@ export default function App() {
   const [entries, setEntries] = useState<DictionaryEntry[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  // 最後に保存（出力）した時点の登録一覧です。現在の entries と比べて、
+  // まだ保存されていない追加・編集を見分けるために使います。
+  const [savedEntries, setSavedEntries] = useState<DictionaryEntry[]>([]);
   const [restoreCopy, setRestoreCopy] = useState<WorkCopy | null>(null);
   const [loadingName, setLoadingName] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -286,17 +294,23 @@ export default function App() {
   }, []);
 
   // 未出力の変更は作業コピーへ自動で退避します。出力済みになったら消します。
+  // 退避には、未保存だった登録の控えも含めます（復元後に別枠を再現するため）。
   useEffect(() => {
     if (entries === null) return;
     const timer = setTimeout(() => {
       if (dirty) {
-        void saveWorkCopy({ entries, fileName, savedAt: new Date().toISOString() });
+        void saveWorkCopy({
+          entries,
+          fileName,
+          savedAt: new Date().toISOString(),
+          unsavedKeys: unsavedContentKeys(entries, savedEntries),
+        });
       } else {
         void clearWorkCopy();
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [entries, fileName, dirty]);
+  }, [entries, fileName, dirty, savedEntries]);
 
   // 品詞注記のツールチップは、外側を触る（クリック・タップ）と閉じます。
   useTooltipClose(noteIndex !== null, () => setNoteIndex(null));
@@ -323,6 +337,7 @@ export default function App() {
     setEntries(null);
     setFileName(null);
     setDirty(false);
+    setSavedEntries([]);
     setForm(null);
     setDeleteIndex(null);
     setSecondaryOpen(false);
@@ -335,12 +350,19 @@ export default function App() {
     setSecondaryFilter(null);
   };
 
-  const startSession = (next: DictionaryEntry[], name: string | null, fromDrive = false) => {
+  const startSession = (
+    next: DictionaryEntry[],
+    name: string | null,
+    fromDrive = false,
+    baseline?: DictionaryEntry[],
+  ) => {
     // Drive以外から開いたセッションでは、競合確認の控えを引き継ぎません。
     if (!fromDrive) clearDriveBaseline();
     setEntries(next);
     setFileName(name);
     setDirty(false);
+    // 作業コピーの復元では、保存時点の一覧が別に再構成されて渡されます。
+    setSavedEntries(baseline ?? next);
     setQuery("");
     setPrimaryFilter(null);
     setSecondaryFilter(null);
@@ -486,6 +508,23 @@ export default function App() {
       .sort((a, b) => a.rank - b.rank || compareEntries(a.entry, b.entry));
   }, [entries, query, primaryFilter, secondaryFilter]);
 
+  // 保存時点から変わっている登録（追加・編集）です。一覧の上部に別枠で
+  // まとめ、検索・絞り込み中は通常の一覧の中で目印を付けます。
+  const unsavedItems = useMemo(() => {
+    if (!entries) return [];
+    const unsaved = new Set(findUnsavedEntries(entries, savedEntries));
+    return entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => unsaved.has(entry));
+  }, [entries, savedEntries]);
+  const unsavedSet = useMemo(
+    () => new Set(unsavedItems.map(({ entry }) => entry)),
+    [unsavedItems],
+  );
+  const isFiltering = query.trim() !== "" || primaryFilter !== null || secondaryFilter !== null;
+  // 別枠を出している間は、通常の一覧から未保存分を除いて二重表示を避けます。
+  const mainView = isFiltering ? view : view.filter(({ entry }) => !unsavedSet.has(entry));
+
   const saveForm = (entry: DictionaryEntry) => {
     if (!form) return;
     if (form.kind === "edit") {
@@ -500,6 +539,56 @@ export default function App() {
     setEntries((prev) => (prev ? prev.filter((_, i) => i !== index) : prev));
     setDirty(true);
     setDeleteIndex(null);
+  };
+
+  // 一覧のカード1件分の表示です。通常の一覧と未保存の別枠で共用します。
+  const renderCard = ({ entry, index }: { entry: DictionaryEntry; index: number }) => {
+    const unsaved = unsavedSet.has(entry);
+    return (
+      <article className={`card${unsaved ? " unsaved" : ""}`} key={index}>
+        <div className="card-top">
+          <span className="card-word">{entry.word}</span>
+          <span className="card-reading">{entry.reading}</span>
+          {unsaved && <span className="unsaved-badge">未保存</span>}
+          {isExcludedFromMs(entry.pos) ? (
+            <button
+              className="pos-badge warn badge-btn"
+              data-pos-note
+              onClick={() => setNoteIndex(noteIndex === index ? null : index)}
+              aria-expanded={noteIndex === index}
+              aria-label={`${entry.pos}についての注記を開く`}
+            >
+              {entry.pos} ⚠
+            </button>
+          ) : (
+            <span className="pos-badge">{entry.pos}</span>
+          )}
+        </div>
+        <div className="card-class">
+          {entry.primary}
+          {entry.secondary && ` › ${entry.secondary}`}
+        </div>
+        {entry.comment && <div className="card-comment">{entry.comment}</div>}
+        {noteIndex === index && <PosNote pos={entry.pos} tooltip />}
+        <div className="card-actions">
+          <button
+            className="link-btn"
+            onClick={() => setForm({ kind: "edit", index, initial: entry })}
+          >
+            編集
+          </button>
+          <button
+            className="link-btn"
+            onClick={() => setForm({ kind: "duplicate", initial: entry })}
+          >
+            複製して新規
+          </button>
+          <button className="link-btn danger" onClick={() => setDeleteIndex(index)}>
+            削除
+          </button>
+        </div>
+      </article>
+    );
   };
 
   return (
@@ -661,59 +750,24 @@ export default function App() {
             </div>
           )}
 
+          {!isFiltering && unsavedItems.length > 0 && (
+            <section className="unsaved-section">
+              <div className="unsaved-heading">未保存の変更（{unsavedItems.length}件）</div>
+              <p className="unsaved-text">
+                次の登録は、まだ保存されていません。「出力」から保存してください。
+              </p>
+              <div className="card-list">{unsavedItems.map(renderCard)}</div>
+            </section>
+          )}
+
           {view.length === 0 ? (
             <div className="empty-note">
               {entries.length === 0
                 ? "まだ登録がありません。「＋ 新規登録」から追加できます。"
                 : "条件に合う登録がありません。検索や絞り込みを変えてみてください。"}
             </div>
-          ) : (
-            <div className="card-list">
-              {view.map(({ entry, index }) => (
-                <article className="card" key={index}>
-                  <div className="card-top">
-                    <span className="card-word">{entry.word}</span>
-                    <span className="card-reading">{entry.reading}</span>
-                    {isExcludedFromMs(entry.pos) ? (
-                      <button
-                        className="pos-badge warn badge-btn"
-                        data-pos-note
-                        onClick={() => setNoteIndex(noteIndex === index ? null : index)}
-                        aria-expanded={noteIndex === index}
-                        aria-label={`${entry.pos}についての注記を開く`}
-                      >
-                        {entry.pos} ⚠
-                      </button>
-                    ) : (
-                      <span className="pos-badge">{entry.pos}</span>
-                    )}
-                  </div>
-                  <div className="card-class">
-                    {entry.primary}
-                    {entry.secondary && ` › ${entry.secondary}`}
-                  </div>
-                  {entry.comment && <div className="card-comment">{entry.comment}</div>}
-                  {noteIndex === index && <PosNote pos={entry.pos} tooltip />}
-                  <div className="card-actions">
-                    <button
-                      className="link-btn"
-                      onClick={() => setForm({ kind: "edit", index, initial: entry })}
-                    >
-                      編集
-                    </button>
-                    <button
-                      className="link-btn"
-                      onClick={() => setForm({ kind: "duplicate", initial: entry })}
-                    >
-                      複製して新規
-                    </button>
-                    <button className="link-btn danger" onClick={() => setDeleteIndex(index)}>
-                      削除
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
+          ) : mainView.length === 0 ? null : (
+            <div className="card-list">{mainView.map(renderCard)}</div>
           )}
 
           {showTopButton && (
@@ -929,7 +983,10 @@ export default function App() {
         <ExportModal
           entries={entries}
           onClose={() => setExportOpen(false)}
-          onMasterExported={() => setDirty(false)}
+          onMasterExported={() => {
+            setDirty(false);
+            if (entries) setSavedEntries(entries);
+          }}
         />
       )}
 
@@ -980,7 +1037,14 @@ export default function App() {
                 setRestoreCopy(null);
                 setLoadingName("作業コピー");
                 setTimeout(() => {
-                  startSession(copy.entries, copy.fileName);
+                  startSession(
+                    copy.entries,
+                    copy.fileName,
+                    false,
+                    copy.unsavedKeys
+                      ? savedBaselineFromKeys(copy.entries, copy.unsavedKeys)
+                      : undefined,
+                  );
                   setDirty(true);
                   setLoadingName(null);
                 }, 80);

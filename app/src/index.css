@@ -474,6 +474,41 @@ textarea {
   padding: 12px 14px;
 }
 
+/* 未保存の登録の別枠と目印 */
+.unsaved-section {
+  border: 1px solid var(--gold);
+  background: var(--warn-bg);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.unsaved-heading {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.unsaved-text {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0 0 10px;
+}
+
+.card.unsaved {
+  border-left-color: var(--gold);
+}
+
+.unsaved-badge {
+  font-size: 11px;
+  background: var(--gold);
+  color: var(--brand);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 .pos-tooltip {
   position: absolute;
   z-index: 6;

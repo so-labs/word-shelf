@@ -7,6 +7,9 @@ export interface WorkCopy {
   entries: DictionaryEntry[];
   fileName: string | null;
   savedAt: string;
+  // 退避した時点で未保存だった登録の内容キーです。復元したときに、
+  // 未保存の別枠を再現するために使います（古い退避には含まれません）。
+  unsavedKeys?: string[];
 }
 
 const DB_NAME = "word-shelf";
@@ -27,7 +30,10 @@ export function isWorkCopy(value: unknown): value is WorkCopy {
         typeof (e as DictionaryEntry).word === "string",
     ) &&
     (typeof copy.fileName === "string" || copy.fileName === null) &&
-    typeof copy.savedAt === "string"
+    typeof copy.savedAt === "string" &&
+    (copy.unsavedKeys === undefined ||
+      (Array.isArray(copy.unsavedKeys) &&
+        copy.unsavedKeys.every((k) => typeof k === "string")))
   );
 }
 
