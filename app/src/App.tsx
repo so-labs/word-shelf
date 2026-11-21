@@ -1556,7 +1556,7 @@ function EntryForm({
                   disabled={aiWordMissing}
                   onClick={() => requestAiAction({ kind: "copy" })}
                 >
-                  プロンプトをコピー
+                  コピー
                 </button>
                 <button
                   type="button"

@@ -573,8 +573,20 @@ textarea {
 
 .ai-help-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.ai-help-actions .btn {
+  padding: 7px 8px;
+  font-size: 13px;
+}
+
+/* ごく狭い画面では、無理に1行へ押し込まず折り返します。 */
+@media (max-width: 360px) {
+  .ai-help-actions {
+    flex-wrap: wrap;
+  }
 }
 
 .pos-tooltip {
