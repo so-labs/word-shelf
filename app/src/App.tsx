@@ -173,6 +173,67 @@ type FormState =
 // AIコメント提案の実行内容です。コピーするか、AIを開く（URL付き）か。
 type AiAction = { kind: "copy" } | { kind: "open"; url: string };
 
+// 横スクロールする要素を、PCのマウスでもドラッグやホイールで流せるように
+// するフックです。スマホはタッチで流れます。ドラッグしたときのクリックは
+// 無効にします。要素が後から現れたり消えたりする場合にも効くよう、
+// コールバックrefを返します。
+function useDragScrollRef<T extends HTMLElement>() {
+  const [el, setEl] = useState<T | null>(null);
+  useEffect(() => {
+    if (!el) return;
+    let down = false;
+    let moved = false;
+    let startX = 0;
+    let startScroll = 0;
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      down = true;
+      moved = false;
+      startX = e.clientX;
+      startScroll = el.scrollLeft;
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!down) return;
+      const dx = e.clientX - startX;
+      if (Math.abs(dx) > 5) moved = true;
+      if (moved) el.scrollLeft = startScroll - dx;
+    };
+    const onUp = () => {
+      down = false;
+    };
+    const onClickCapture = (e: MouseEvent) => {
+      if (moved) {
+        e.preventDefault();
+        e.stopPropagation();
+        moved = false;
+      }
+    };
+    // PCのマウスホイールでも横スクロールできるようにします。要素の上に
+    // ポインタがある間は、端まで来てもページ側へスクロールを譲りません。
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      e.preventDefault();
+      const max = el.scrollWidth - el.clientWidth;
+      el.scrollLeft = Math.min(max, Math.max(0, el.scrollLeft + delta));
+    };
+    el.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    el.addEventListener("click", onClickCapture, true);
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      el.removeEventListener("click", onClickCapture, true);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [el]);
+  return setEl;
+}
+
 export default function App() {
   const [entries, setEntries] = useState<DictionaryEntry[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -237,64 +298,7 @@ export default function App() {
   }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const chipRowRef = useRef<HTMLDivElement>(null);
-
-  // 分類チップの横スクロールです。スマホはタッチで流れますが、PCのマウスでは
-  // ドラッグで流れるようにします。ドラッグしたときのクリックは無効にします。
-  useEffect(() => {
-    const el = chipRowRef.current;
-    if (!el) return;
-    let down = false;
-    let moved = false;
-    let startX = 0;
-    let startScroll = 0;
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse") return;
-      down = true;
-      moved = false;
-      startX = e.clientX;
-      startScroll = el.scrollLeft;
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!down) return;
-      const dx = e.clientX - startX;
-      if (Math.abs(dx) > 5) moved = true;
-      if (moved) el.scrollLeft = startScroll - dx;
-    };
-    const onUp = () => {
-      down = false;
-    };
-    const onClickCapture = (e: MouseEvent) => {
-      if (moved) {
-        e.preventDefault();
-        e.stopPropagation();
-        moved = false;
-      }
-    };
-    // PCのマウスホイールでも横スクロールできるようにします。チップ列の上に
-    // ポインタがある間は、端まで来てもページ側へスクロールを譲りません
-    // （特に上方向で、ページが一緒に動いてしまうのを防ぎます）。
-    const onWheel = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return;
-      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      if (delta === 0) return;
-      e.preventDefault();
-      const max = el.scrollWidth - el.clientWidth;
-      el.scrollLeft = Math.min(max, Math.max(0, el.scrollLeft + delta));
-    };
-    el.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    el.addEventListener("click", onClickCapture, true);
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      el.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      el.removeEventListener("click", onClickCapture, true);
-      el.removeEventListener("wheel", onWheel);
-    };
-  }, [entries]);
+  const chipRowRef = useDragScrollRef<HTMLDivElement>();
 
   // 起動時に作業コピー（未出力のまま閉じた編集中の内容）が残っていれば、
   // 復元するか聞きます。
@@ -1286,19 +1290,30 @@ function EntryForm({
       : secondaries;
   const secondarySuggestions = suggest(secondarySource, fields.secondary);
 
+  // 候補チップの並びも、PCではドラッグやホイールで横スクロールできるように
+  // します（一覧のチップ列と同じフックを使います）。
+  const primarySuggestRef = useDragScrollRef<HTMLDivElement>();
+  const secondarySuggestRef = useDragScrollRef<HTMLDivElement>();
+
   const suggestionChips = (key: "primary" | "secondary", list: string[]): ReactNode =>
     focusedField === key &&
     list.length > 0 && (
-      <div className="suggest-row">
+      <div
+        className="suggest-row"
+        ref={key === "primary" ? primarySuggestRef : secondarySuggestRef}
+      >
         {list.map((name) => (
           <button
             key={name}
             type="button"
             className="suggest-chip"
             onMouseDown={(e) => {
+              // 入力欄からフォーカスが外れないようにするだけにして、選択は
+              // クリックで確定させます（ドラッグスクロールの直後にクリックが
+              // 効いてしまわないようにするためです）。
               e.preventDefault();
-              set(key, name);
             }}
+            onClick={() => set(key, name)}
           >
             {name}
           </button>
@@ -1808,7 +1823,7 @@ function ExportModal({
       {driveError && <div className="error-banner">{driveError}</div>}
       {driveSaved && <p className="settings-desc">Google Driveに保存しました。</p>}
 
-      <div className="modal-actions">
+      <div className="modal-actions export-actions">
         <button className="btn" onClick={onClose}>
           閉じる
         </button>
@@ -1818,7 +1833,7 @@ function ExportModal({
             disabled={driveBusy}
             onClick={() => void saveToDrive(false)}
           >
-            {driveBusy ? "保存しています…" : "Google Driveに保存"}
+            {driveBusy ? "保存しています…" : "Driveに保存"}
           </button>
         )}
         <button className="btn btn-gold" onClick={downloadAll}>

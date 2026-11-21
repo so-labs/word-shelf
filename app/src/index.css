@@ -885,6 +885,17 @@ textarea {
   flex-wrap: wrap;
 }
 
+/* 出力画面のボタンは、一般的なスマホの幅でも1行に収めます。 */
+.export-actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.export-actions .btn {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
 /* フォーム */
 .field {
   margin-bottom: 14px;
@@ -917,12 +928,24 @@ textarea {
 
 .suggest-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-top: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  cursor: grab;
+}
+
+.suggest-row:active {
+  cursor: grabbing;
+}
+
+.suggest-row::-webkit-scrollbar {
+  display: none;
 }
 
 .suggest-chip {
+  flex: none;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
