@@ -1400,13 +1400,12 @@ function EntryForm({
   const [focusedField, setFocusedField] = useState<"primary" | "secondary" | null>(null);
 
   // 分類の入力候補です。ブラウザ標準の候補表示（datalist）はスマホで表示が
-  // 安定しないため、候補チップを自前で出します。
+  // 安定しないため、候補チップを自前で出します。候補の列は横スクロールで
+  // 全部たどれるため、件数で打ち切らず、入力中の文字列だけで絞ります。
   const suggest = (list: string[], current: string): string[] =>
-    list
-      .filter(
-        (name) => name !== "" && name !== current && (current === "" || name.includes(current)),
-      )
-      .slice(0, 8);
+    list.filter(
+      (name) => name !== "" && name !== current && (current === "" || name.includes(current)),
+    );
 
   const primarySuggestions = suggest(primaries, fields.primary);
   const secondarySource =
